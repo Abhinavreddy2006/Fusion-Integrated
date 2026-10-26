@@ -20,13 +20,58 @@
 
 ## 2. Local AI Model Connection & Diagnosis
 
-- **Model Verification**: Verified that Ollama model `qwen2.5:7b` (Q4_K_M, 4.68 GB, digest `845dbda0ea48`) is installed in `~/.ollama/models`. (The model `qwen2.5-coder:7b` mentioned in the previous PR description is not present on disk; local evidence confirms `qwen2.5:7b`).
-- **Connection Issue Diagnosis**:
-  - On Windows, `ollama.exe` was present but not running as an active background service. Started `ollama serve` on Windows, which bound to `0.0.0.0:11434`.
-  - In WSL2, `curl localhost:11434` failed because WSL2 operates on its own virtual NAT network namespace (`172.29.119.49`). The Windows host is reachable via the default route gateway (`172.29.112.1`).
-  - Tested `curl http://172.29.112.1:11434/api/tags` inside WSL, which successfully connected and returned `qwen2.5:7b`.
-  - Created `ops/llm_query.py` to seamlessly resolve and query the local Ollama instance from WSL or host.
-- **Model-Assisted Review**: Utilized `qwen2.5:7b` to review domain policy functions (specifically `convert_vl_to_el`), identifying the truncation defect in integer floor division.
+- **Model Verification**: Verified that Ollama model `qwen2.5:7b` (Q4_K_M, 4.68 GB, digest `845dbda0ea48fc2344bd43899be49c4f1c10714b29bb89ab57c2cbe9b25aa948`) is installed in `~/.ollama/models`. (The model `qwen2.5-coder:7b` mentioned in early discussion was confirmed absent on disk; actual verified model is `qwen2.5:7b`).
+- **Connection Issue Diagnosis & Headless Resolution**:
+  - Direct execution of `ollama.exe list` on Windows attempted to launch the desktop UI tray application (`msg="starting ui server" port=64644`), which failed in non-interactive/remote environments with `Unable to init instance: Unspecified error`.
+  - The correct headless daemon command was executed via PowerShell:
+    ```powershell
+    $env:OLLAMA_HOST = "0.0.0.0:11434"; & "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" serve
+    ```
+  - Ollama bound to `[::]:11434`, discovered local CPU resources, and listened across all network interfaces.
+  - In WSL2, cross-boundary networking was verified: `curl http://172.29.112.1:11434/api/tags` returned `{"models":[{"name":"qwen2.5:7b", ...}]}`.
+  - Active memory residency was confirmed via `curl http://172.29.112.1:11434/api/ps`:
+    ```json
+    {
+      "models": [
+        {
+          "name": "qwen2.5:7b",
+          "model": "qwen2.5:7b",
+          "size": 4605440000,
+          "digest": "845dbda0ea48fc2344bd43899be49c4f1c10714b29bb89ab57c2cbe9b25aa948",
+          "details": {"format": "gguf", "family": "qwen2", "parameter_size": "7.6B", "quantization_level": "Q4_K_M"},
+          "context_length": 4096
+        }
+      ]
+    }
+    ```
+  - Created [`ops/llm_query.py`](file:///home/abhi/Documents/Fusion/Fusion-Integrated/ops/llm_query.py) to resolve the gateway IP dynamically and stream inference requests directly to Ollama without cloud intermediaries.
+- **Genuine Local Model-Assisted Code Review (Zero Cloud Fallback)**:
+  - Invoked `ops/llm_query.py` on WSL to evaluate the domain policy function `convert_vl_to_el` against BR-EL-007.
+  - **Verbatim Model Review Output (`qwen2.5:7b`)**:
+    > #### Phase 1 Implementation:
+    > ```python
+    > def convert_vl_to_el(unavailed_vl: Decimal) -> Decimal:
+    >     return unavailed_vl // Decimal("2")
+    > ```
+    > **Defect Explanation:**
+    > The use of integer floor division (`//`) in the Phase 1 implementation will truncate any fractional part, which is not compliant with BR-EL-007. For example:
+    > - If `unavailed_vl` is 15 days, it would yield `15 // 2 = 7`, instead of the expected 7.5.
+    > - Similarly, for 1.5 VL, the result would be `1.5 // 2 = 0`, which does not correctly reflect the intended ratio.
+    > 
+    > #### Phase 2 Implementation:
+    > ```python
+    > def convert_vl_to_el(unavailed_vl: Decimal) -> Decimal:
+    >     return unavailed_vl / Decimal("2")
+    > ```
+    > **Correctness Confirmation:**
+    > The Phase 2 implementation uses standard division (`/`), which correctly handles fractional values. Let's verify a few scenarios:
+    > - For 15 VL days, `unavailed_vl = 15`, the result is `15 / 2 = 7.5`.
+    > - For 1.5 VL days, the result is `1.5 / 2 = 0.75`.
+    > This approach correctly implements BR-EL-007 and AFR-EL-008.5, ensuring fractional balances are accurately converted.
+    > 
+    > **Conclusion:**
+    > - **Phase 1**: Uses incorrect `//` operator, leading to truncation of fractions.
+    > - **Phase 2**: Correctly uses `/` for accurate fractional conversion as per BR-EL-007.
 
 ---
 
