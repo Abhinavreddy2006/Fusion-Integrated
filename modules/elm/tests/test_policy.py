@@ -74,3 +74,27 @@ def test_vl_to_el_conversion_and_cap():
     capped_credit, capped_total = convert_vl_to_el(Decimal("30"), Decimal("290"), Decimal("300"))
     assert capped_credit == Decimal("10")
     assert capped_total == Decimal("300")
+
+
+def test_fractional_vl_to_el_conversion():
+    # BR-EL-007 and AFR-EL-008.5: odd/fractional VL must convert to exact fractional EL (15 VL -> 7.5 EL)
+    credited, updated = convert_vl_to_el(Decimal("15"), Decimal("10"), Decimal("300"))
+    assert credited == Decimal("7.5")
+    assert updated == Decimal("17.5")
+
+
+def test_resumption_delta():
+    from modules.elm.domain.policy import calculate_resumption_delta, is_director
+
+    assert is_director("Director")
+    assert is_director("director")
+    assert not is_director("Professor")
+
+    adj_type, delta = calculate_resumption_delta(Decimal("5"), Decimal("5"))
+    assert adj_type == "NONE" and delta == Decimal("0")
+
+    adj_type, delta = calculate_resumption_delta(Decimal("5"), Decimal("3"))
+    assert adj_type == "RESTORE" and delta == Decimal("2")
+
+    adj_type, delta = calculate_resumption_delta(Decimal("5"), Decimal("7"))
+    assert adj_type == "DEBIT" and delta == Decimal("2")

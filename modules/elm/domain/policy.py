@@ -80,6 +80,10 @@ def remaining(allotted: Decimal, used: Decimal, requested: Decimal) -> Decimal:
     return available - requested
 
 
+def is_director(designation: str) -> bool:
+    return bool(designation and designation.strip().lower() == "director")
+
+
 def convert_vl_to_el(
     unavailed_vl: Decimal,
     current_el: Decimal,
@@ -87,7 +91,25 @@ def convert_vl_to_el(
 ) -> tuple[Decimal, Decimal]:
     if unavailed_vl < 0 or current_el < 0 or max_el <= 0:
         raise ValueError("Balances and caps must be non-negative.")
-    raw_credit = unavailed_vl // Decimal("2")
+    raw_credit = unavailed_vl / Decimal("2")
     room = max(Decimal("0"), max_el - current_el)
     credited = min(raw_credit, room)
     return credited, current_el + credited
+
+
+def calculate_resumption_delta(
+    approved_duration: Decimal, actual_duration: Decimal
+) -> tuple[str, Decimal]:
+    """Return (adjustment_type, days_delta).
+
+    - 'NONE', 0: exactly on time
+    - 'RESTORE', delta: early return, restore delta to employee balance
+    - 'DEBIT', delta: late return, deduct delta from employee balance
+    """
+    if approved_duration <= 0 or actual_duration <= 0:
+        raise ValueError("Durations must be positive.")
+    if actual_duration == approved_duration:
+        return "NONE", Decimal("0")
+    if actual_duration < approved_duration:
+        return "RESTORE", approved_duration - actual_duration
+    return "DEBIT", actual_duration - approved_duration
